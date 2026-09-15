@@ -66,7 +66,7 @@
   <button id="fs">全螢幕</button>
 
 <script type="module">
-/* 《被紀念的痕跡》 deploy 版 —— 純客戶端：webcam 暗場採集 + 即時高度場掌印
+/* 《被紀念的痕跡》 deploy 最終版 —— 純客戶端：webcam 暗場採集 + 即時高度場掌印
    無後端、無資料庫；畫面僅在頁內處理、即用即棄。
    路徑全相對：可部署於網域根或 GitHub Pages 子路徑。 */
 
@@ -271,6 +271,29 @@ function buildImprint(burn){
   Hcur.set(Hblur); writeHTex(Hcur);
 }
 
+/* ================= 石膏晶粒法線（程序化材質感） ================= */
+function plasterNormal(){
+  const S=256,c=document.createElement('canvas');c.width=c.height=S;
+  const cc=c.getContext('2d'),img=cc.createImageData(S,S);
+  const h=new Float32Array(S*S);
+  for(let i=0;i<S*S;i++)h[i]=Math.random();
+  boxBlur(h,S,S,1);
+  for(let y=0;y<S;y++)for(let x=0;x<S;x++){
+    const i=y*S+x;
+    const dx=h[y*S+((x+1)%S)]-h[y*S+((x-1+S)%S)];
+    const dy=h[((y+1)%S)*S+x]-h[((y-1+S)%S)*S+x];
+    const len=Math.hypot(dx*2.2,dy*2.2,1);
+    img.data[i*4]=((-dx*2.2/len)*.5+.5)*255;
+    img.data[i*4+1]=((-dy*2.2/len)*.5+.5)*255;
+    img.data[i*4+2]=((1/len)*.5+.5)*255;
+    img.data[i*4+3]=255;
+  }
+  cc.putImageData(img,0,0);
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3,3);
+  return t;
+}
+
 /* ================= 3D 場景 ================= */
 let renderer,scene,camera,plaqueGroup,imprint,imprintMat,motes,faceZ=0;
 async function init3D(){
@@ -283,17 +306,19 @@ async function init3D(){
   camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.1,50);
   camera.position.set(0,0,3.6);
   scene.add(new THREE.AmbientLight(0x2a2018,.55));
-  const key=new THREE.DirectionalLight(0xffd9a0,1.7); key.position.set(4,1.6,2.2); scene.add(key);
+  const key=new THREE.DirectionalLight(0xffd9a0,1.7); key.position.set(4,1.6,2.2); scene.add(key); // 側光：浮雕靈魂
   const rim=new THREE.DirectionalLight(0x6688ff,.35); rim.position.set(-3,2,-2); scene.add(rim);
   motes=makeMotes(); scene.add(motes);
   plaqueGroup=new THREE.Group(); scene.add(plaqueGroup);
   makeHTex();
-  const plaque=await loadPlaque();
+  const grain=plasterNormal();
+  const plaque=await loadPlaque(grain);
   plaqueGroup.add(plaque);
   faceZ=new THREE.Box3().setFromObject(plaque).max.z;
   imprintMat=new THREE.MeshStandardMaterial({color:0xE9DCC6,roughness:.92,metalness:0,
     transparent:true,opacity:0,displacementMap:htex,displacementScale:0,
     emissive:0xff8a4a,emissiveIntensity:0,emissiveMap:htex,
+    normalMap:grain,normalScale:new THREE.Vector2(.35,.35),
     polygonOffset:true,polygonOffsetFactor:-2});
   imprint=new THREE.Mesh(new THREE.PlaneGeometry(1,1,200,200),imprintMat);
   imprint.position.z=faceZ+0.015; imprint.visible=false;
@@ -301,21 +326,28 @@ async function init3D(){
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;
     camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);});
 }
-async function loadPlaque(){
+async function loadPlaque(grain){
+  let GLTFLoader;
+  try{ ({GLTFLoader}=await import('./assets/vendor/loaders/GLTFLoader.js')); }
+  catch{ setOp('缺 GLTFLoader.js → 使用程序化空白碑'); return proceduralPlaque(grain); }
   try{
-    const {GLTFLoader}=await import('./assets/vendor/loaders/GLTFLoader.js');
     const g=await new GLTFLoader().loadAsync('./assets/models/plaque.glb');
-    const root=g.scene, bb=new THREE.Box3().setFromObject(root);
+    const root=g.scene;
+    /* 統一碑身材質：與印子層同色同質感，避免色差圈 */
+    root.traverse(o=>{ if(o.isMesh) o.material=new THREE.MeshStandardMaterial(
+      {color:0xE4D8C2,roughness:.95,metalness:0,
+       normalMap:grain,normalScale:new THREE.Vector2(.35,.35)}); });
+    const bb=new THREE.Box3().setFromObject(root);
     const size=bb.getSize(new THREE.Vector3()).length()||1;
     root.position.sub(bb.getCenter(new THREE.Vector3()));
     const wrap=new THREE.Group(); wrap.add(root); wrap.scale.setScalar(2.3/size);
+    /* 朝向修正（匯入後若碑面不對向鏡頭，擇一解除註解）：
+       wrap.rotation.x=-Math.PI/2;   // 碑面朝上(+Y)
+       wrap.rotation.y=Math.PI;      // 碑面朝背(-Z) */
     setOp('已載入正式 plaque.glb'); return wrap;
-  }catch{
-    setOp('尚無 plaque.glb → 使用程序化空白碑');
-    return proceduralPlaque();
-  }
+  }catch{ setOp('尚無 plaque.glb → 使用程序化空白碑'); return proceduralPlaque(grain); }
 }
-function proceduralPlaque(){
+function proceduralPlaque(grain){
   const s=1.15,r=.14,shape=new THREE.Shape();
   shape.moveTo(-s+r,-s); shape.lineTo(s-r,-s); shape.quadraticCurveTo(s,-s,s,-s+r);
   shape.lineTo(s,s-r); shape.quadraticCurveTo(s,s,s-r,s);
@@ -324,7 +356,9 @@ function proceduralPlaque(){
   const geo=new THREE.ExtrudeGeometry(shape,{depth:.16,bevelEnabled:true,
     bevelThickness:.03,bevelSize:.03,bevelSegments:4,curveSegments:24});
   geo.translate(0,0,-.08);
-  return new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xE4D8C2,roughness:.95,metalness:0}));
+  return new THREE.Mesh(geo,new THREE.MeshStandardMaterial(
+    {color:0xE4D8C2,roughness:.95,metalness:0,
+     normalMap:grain,normalScale:new THREE.Vector2(.35,.35)}));
 }
 function makeMotes(){
   const n=220,p=new Float32Array(n*3);
@@ -408,7 +442,7 @@ function step(now,det){
         impOX=clamp((det.cx-.5)*1.1,-.45,.45);
         impOY=clamp((.5-det.cy)*.9,-.45,.45);
         impScale=clamp(.75+(det.area-.10)/.20*.40,.75,1.15);
-        for(let i=0;i<PW*PH;i++)if(det.S[i]>burn[i])burn[i]=det.S[i];
+        for(let i=0;i<PW*PH;i++)if(det.S[i]>burn[i])burn[i]=det.S[i]; // 燒錄
         if(now-holdStart>K.effortMaxMs){finishEffort(now);goto('LOSS',now);}
       }else{
         presentAt=null; absentAt??=now;
