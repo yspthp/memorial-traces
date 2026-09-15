@@ -337,14 +337,14 @@ async function loadPlaque(grain){
     root.traverse(o=>{ if(o.isMesh) o.material=new THREE.MeshStandardMaterial(
       {color:0xE4D8C2,roughness:.95,metalness:0,
        normalMap:grain,normalScale:new THREE.Vector2(.35,.35)}); });
+    /* 立起碑面：Meshy 模型預設於 X-Z 平面水平平躺，繞 X 軸轉 -90 度豎立起來正面朝向鏡頭 */
+    root.rotation.x = -Math.PI / 2;
+    root.updateMatrixWorld(true);
     const bb=new THREE.Box3().setFromObject(root);
     const size=bb.getSize(new THREE.Vector3()).length()||1;
     root.position.sub(bb.getCenter(new THREE.Vector3()));
     const wrap=new THREE.Group(); wrap.add(root); wrap.scale.setScalar(2.3/size);
-    /* 朝向修正（匯入後若碑面不對向鏡頭，擇一解除註解）：
-       wrap.rotation.x=-Math.PI/2;   // 碑面朝上(+Y)
-       wrap.rotation.y=Math.PI;      // 碑面朝背(-Z) */
-    setOp('已載入正式 plaque.glb'); return wrap;
+    setOp('已載入正式 plaque.glb（已立起面向鏡頭）'); return wrap;
   }catch{ setOp('尚無 plaque.glb → 使用程序化空白碑'); return proceduralPlaque(grain); }
 }
 function proceduralPlaque(grain){
