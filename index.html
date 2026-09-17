@@ -36,7 +36,7 @@
 <body>
 <main id="gl" aria-label="立體石膏板，手印直接凹入表面"></main>
 <header><p>MEMORIAL TRACES / 被珍藏的印記</p><h1>被紀念的痕跡</h1></header>
-<div id="mode">掌形預覽 · v4</div>
+<div id="mode">掌形預覽 · v4.1</div>
 <section id="copy" aria-live="polite" aria-atomic="true">
   <h2 id="headline">每一道痕跡，都值得被留下。</h2>
   <p id="message">正在準備石膏表面…</p>
@@ -57,7 +57,7 @@
 <output id="debug" hidden></output>
 <noscript>此互動體驗需要 JavaScript。請啟用後重新載入。</noscript>
 <script type="module">
-import('./app.mjs?v=4').catch(error => {
+import('./app.mjs?v=4.1').catch(error => {
   console.error(error);
   document.getElementById('headline').textContent='未能啟動立體畫面';
   document.getElementById('message').textContent='請使用支援 WebGL 的瀏覽器，並重新載入頁面。';

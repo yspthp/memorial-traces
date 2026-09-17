@@ -1,6 +1,7 @@
 import {Capture} from './capture-landmarks.mjs';
 import {HoldGate,landmarksToMask} from './hand-shape.mjs';
 import {demoMask} from './relief.mjs';
+import {revealCopyAt} from './reveal-copy.mjs';
 export function mountInteraction({setMask,setDepth,getDepth}){
   const $=id=>document.getElementById(id),params=new URLSearchParams(location.search);
   const debug=params.get('debug')==='1',reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -10,6 +11,9 @@ export function mountInteraction({setMask,setDepth,getDepth}){
   function text(title,message){if($('headline').textContent!==title)$('headline').textContent=title;if($('message').textContent!==message)$('message').textContent=message;}
   function enter(next,now=performance.now()){
     state=next;entered=now;since=absent=null;hold.reset();
+    const delayed=next==='REVEAL'||next==='DEMO';
+    $('headline').style.opacity=$('message').style.opacity=delayed?'0':'1';
+    if(delayed)text('','');
     $('meter').hidden=next!=='CAPTURE';$('bar').style.width='0%';
     $('preview-panel').hidden=mode!=='camera';$('stop').hidden=mode!=='camera';
   }
@@ -17,7 +21,7 @@ export function mountInteraction({setMask,setDepth,getDepth}){
   function demo(){
     epoch++;capture.stop();waiting=false;$('camera').disabled=false;mode='demo';result=null;
     setMask(demoMask(257));target=1;$('mode').textContent='示範 · 藝術化掌紋';$('replay').hidden=false;
-    enter('DEMO');text('你一直被看見。','你的每一個痕跡，在神眼中都是最寶貴的。');
+    enter('DEMO');
   }
   async function start(){
     if(waiting)return;
@@ -25,7 +29,7 @@ export function mountInteraction({setMask,setDepth,getDepth}){
     enter('CONNECT');text('讓你的手掌，留下痕跡。','請允許鏡頭；模型只在本機辨識，不會上傳影像。');
     try{
       await capture.start();if(token!==epoch)return;
-      $('mode').textContent='掌形預覽 · v4';enter('READY');
+      $('mode').textContent='掌形預覽 · v4.1';enter('READY');
       text('請把手掌放入框內。','看見綠色骨架後，自然停留三秒。');
     }catch(error){
       if(token!==epoch)return;
@@ -66,15 +70,21 @@ export function mountInteraction({setMask,setDepth,getDepth}){
       }catch{stop();text('手部辨識已暫停。','鏡頭或辨識程序中斷；請重新開始，或觀看示範。');}
     }
     if(state==='LOSS'){text('這麼用力，卻只有淡淡的痕跡嗎？','請慢慢移開手掌。');if(now-entered>4000)enter('REMOVE',now);}
-    if(state==='REVEAL'){text('你一直被看見。','你的每一個痕跡，在神眼中都是最寶貴的。');if(now-entered>14000){target=0;enter('FADE',now);}}
+    if(state==='REVEAL'||state==='DEMO'){
+      const copy=revealCopyAt(now-entered,reduced);
+      text(copy.title,copy.message);
+      $('headline').style.opacity=String(copy.titleOpacity);
+      $('message').style.opacity=String(copy.messageOpacity);
+      if(state==='REVEAL'&&now-entered>14000){target=0;enter('FADE',now);}
+    }
     if(state==='FADE'&&now-entered>3500)enter('READY',now);
     if(['REMOVE','INVITE'].includes(state)&&now-entered>60000){target=0;enter('READY',now);}
     const next=reduced?target:getDepth()+(target-getDepth())*(1-Math.exp(-dt/650));
     setDepth(Math.abs(next-target)<.001?target:next);
-    if(debug)$('debug').textContent=`${state} | depth ${getDepth().toFixed(2)} | ${result?.valid?'21 landmarks':'waiting'} | v4`;
+    if(debug)$('debug').textContent=`${state} | depth ${getDepth().toFixed(2)} | ${result?.valid?'21 landmarks':'waiting'} | v4.1`;
   }
   $('camera').onclick=start;$('demo').onclick=demo;$('stop').onclick=stop;
-  $('replay').onclick=()=>{setDepth(0);target=1;};
+  $('replay').onclick=()=>{setDepth(0);target=1;enter('DEMO');};
   $('fs').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{$('message').textContent='此瀏覽器未能切換全螢幕；仍可繼續體驗。';}};
   addEventListener('pagehide',stop);
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='camera')stop();});
