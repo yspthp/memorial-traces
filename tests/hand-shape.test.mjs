@@ -2,13 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {assessHands,HoldGate,motionBetween,landmarksToMask} from '../hand-shape.mjs';
 import {bounds,makeRelief} from '../relief.mjs';
-export const hand=[
- [.5,.82],[.4,.72],[.32,.62],[.25,.54],[.18,.48],
- [.39,.55],[.36,.4],[.35,.3],[.34,.2],
- [.5,.52],[.5,.35],[.5,.24],[.5,.13],
- [.6,.54],[.62,.39],[.64,.29],[.65,.21],
- [.69,.6],[.74,.49],[.77,.4],[.79,.32]
-].map(([x,y])=>({x,y}));
+import {hand} from './hand-fixture.mjs';
 test('one open hand accepted; absent, two hands, clipped, tiny and closed rejected',()=>{
  assert.equal(assessHands([hand]).valid,true);
  assert.equal(assessHands([]).present,false);

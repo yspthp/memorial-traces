@@ -24,6 +24,7 @@
   #preview-panel{position:fixed;bottom:130px;left:24px;width:240px;border:1px solid #d8dec447;border-radius:10px;background:#132021;overflow:hidden}
   #preview{display:block;width:100%;height:auto}
   #tracking-status{margin:8px 10px;font:12px/1.6 system-ui;color:#d7e7df}
+  #preview-panel::before{content:"只顯示手部辨識結果";display:block;padding:7px 10px;background:#0e1718;color:#9db4aa;font:10px system-ui;letter-spacing:.08em}
   #privacy{position:fixed;left:24px;bottom:8px;font:10px system-ui;color:#93a39c}
   #debug{position:fixed;top:90px;left:24px;font:11px monospace;color:#c6d6b6}
   [hidden]{display:none!important}
@@ -35,14 +36,14 @@
 <body>
 <main id="gl" aria-label="立體石膏板，手印直接凹入表面"></main>
 <header><p>MEMORIAL TRACES / 被珍藏的印記</p><h1>被紀念的痕跡</h1></header>
-<div id="mode">手部辨識 · v3</div>
+<div id="mode">掌形預覽 · v4</div>
 <section id="copy" aria-live="polite" aria-atomic="true">
   <h2 id="headline">每一道痕跡，都值得被留下。</h2>
   <p id="message">正在準備石膏表面…</p>
   <div id="meter" hidden><div id="bar"></div></div>
 </section>
 <aside id="preview-panel" hidden>
-  <canvas id="preview" aria-label="鏡像手部預覽：綠色骨架代表姿勢適合，黃色代表需要調整"></canvas>
+  <canvas id="preview" aria-label="只顯示手部辨識結果；綠色掌形代表姿勢適合，黃色代表需要調整"></canvas>
   <p id="tracking-status" role="status">把一隻手放入框內，掌心朝鏡頭。</p>
 </aside>
 <div id="controls">
@@ -52,11 +53,11 @@
   <button id="stop" hidden>停止鏡頭</button>
   <button id="fs">全螢幕</button>
 </div>
-<small id="privacy">影像不會上傳或儲存 · 首次辨識需連線下載模型</small>
+<small id="privacy">不顯示鏡頭原圖 · 影像只在本機分析，不上傳或儲存</small>
 <output id="debug" hidden></output>
 <noscript>此互動體驗需要 JavaScript。請啟用後重新載入。</noscript>
 <script type="module">
-import('./app.mjs?v=3').catch(error => {
+import('./app.mjs?v=4').catch(error => {
   console.error(error);
   document.getElementById('headline').textContent='未能啟動立體畫面';
   document.getElementById('message').textContent='請使用支援 WebGL 的瀏覽器，並重新載入頁面。';

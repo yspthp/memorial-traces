@@ -1,4 +1,5 @@
-import {assessHands,smoothPoints,motionBetween,CONNECTIONS} from './hand-shape.mjs';
+import {assessHands,smoothPoints,motionBetween} from './hand-shape.mjs';
+import {drawHandPreview} from './hand-preview.mjs';
 export const WIDTH=480,HEIGHT=360;
 export class Capture {
   constructor(canvas,onStatus=()=>{}) {
@@ -7,6 +8,7 @@ export class Capture {
     this.input.width=WIDTH;this.input.height=HEIGHT;this.ictx=this.input.getContext('2d');
     this.video=document.createElement('video');this.video.muted=true;this.video.playsInline=true;
     this.onStatus=onStatus;this.generation=0;
+    drawHandPreview(this.ctx,null);
   }
   async start(){
     this.stop();const generation=this.generation;
@@ -48,21 +50,17 @@ export class Capture {
   }
   frame(now){
     if(this.failure)throw this.failure;
+    drawHandPreview(this.ctx,now-this.lastAt<450?this.points:null,this.latest?.valid);
     if(this.video.readyState<2)return null;
-    const vw=this.video.videoWidth,vh=this.video.videoHeight,sw=Math.min(vw,vh*4/3),sh=sw*3/4;
-    this.ictx.drawImage(this.video,(vw-sw)/2,(vh-sh)/2,sw,sh,0,0,WIDTH,HEIGHT);
-    this.ctx.setTransform(-1,0,0,1,WIDTH,0);this.ctx.drawImage(this.input,0,0);this.ctx.setTransform(1,0,0,1,0,0);
-    this.ctx.strokeStyle='#ffffff88';this.ctx.lineWidth=1;this.ctx.setLineDash([6,5]);this.ctx.strokeRect(24,18,WIDTH-48,HEIGHT-36);this.ctx.setLineDash([]);
-    if(this.points&&now-this.lastAt<450){
-      this.ctx.strokeStyle=this.latest?.valid?'#71f0bc':'#ffd086';this.ctx.fillStyle=this.ctx.strokeStyle;this.ctx.lineWidth=3;
-      for(const[a,b]of CONNECTIONS){this.ctx.beginPath();this.ctx.moveTo(this.points[a].x*WIDTH,this.points[a].y*HEIGHT);this.ctx.lineTo(this.points[b].x*WIDTH,this.points[b].y*HEIGHT);this.ctx.stroke();}
-      for(const p of this.points){this.ctx.beginPath();this.ctx.arc(p.x*WIDTH,p.y*HEIGHT,3,0,Math.PI*2);this.ctx.fill();}
-    }
     if(this.ready&&!this.busy&&now-(this.sentAt||0)>100&&this.video.currentTime!==this.videoTime){
       this.busy=true;this.sentAt=now;this.videoTime=this.video.currentTime;
+      // Raw pixels only enter the detached inference canvas, never the visible one.
+      const vw=this.video.videoWidth,vh=this.video.videoHeight,sw=Math.min(vw,vh*4/3),sh=sw*3/4;
+      this.ictx.drawImage(this.video,(vw-sw)/2,(vh-sh)/2,sw,sh,0,0,WIDTH,HEIGHT);
       const generation=this.generation;
       createImageBitmap(this.input).then(bitmap=>{
         if(generation!==this.generation){bitmap.close();return;}
+        this.ictx.clearRect(0,0,WIDTH,HEIGHT);
         this.worker.postMessage({type:'frame',time:now,bitmap},[bitmap]);
       }).catch(error=>{if(generation===this.generation){this.failure=error;this.busy=false;}});
     }
@@ -74,6 +72,6 @@ export class Capture {
     this.worker?.terminate();this.worker=null;
     this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;this.video.srcObject=null;
     this.ready=this.busy=this.unread=false;this.failure=this.latest=this.points=this.raw=null;this.videoTime=-1;
-    this.ctx.clearRect(0,0,WIDTH,HEIGHT);this.ictx.clearRect(0,0,WIDTH,HEIGHT);
+    drawHandPreview(this.ctx,null);this.ictx.clearRect(0,0,WIDTH,HEIGHT);
   }
 }

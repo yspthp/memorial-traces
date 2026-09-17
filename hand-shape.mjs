@@ -50,23 +50,62 @@ function inCapsule(x,y,a,b,ra,rb){
   const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((x-a.x)*dx+(y-a.y)*dy)/(dx*dx+dy*dy||1));
   return Math.hypot(x-a.x-t*dx,y-a.y-t*dy)<ra+(rb-ra)*t;
 }
-// Approximate shape from joints, not pixel segmentation or biometric palm detail.
+function convexHull(points){
+  const sorted=points.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+  const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+  const half=list=>{const h=[];for(const p of list){while(h.length>1&&cross(h[h.length-2],h[h.length-1],p)<=0)h.pop();h.push(p);}h.pop();return h;};
+  return [...half(sorted),...half(sorted.slice().reverse())];
+}
+// One anatomical approximation shared by the screen-space preview and sculpture.
+// All radii describe soft tissue around the tracked joint centres, not measured skin.
+function shapeFromJoints(p){
+  const wrist=p[0],dx=p[9].x-wrist.x,dy=p[9].y-wrist.y;
+  const length=Math.max(1e-6,Math.hypot(dx,dy)),ux=dx/length,uy=dy/length;
+  const span=Math.max(1e-6,Math.hypot(p[5].x-p[17].x,p[5].y-p[17].y));
+  // MCP centres can substantially understate palm width in an oblique view.
+  // Use palm length as a bounded second estimate; never move the joint centres.
+  const width=Math.max(span,Math.min(span*1.5,length*.95));
+  const centre={x:wrist.x+ux*length*.51,y:wrist.y+uy*length*.51};
+  const cloud=[];
+  // A rounded heel and full palm sides replace the triangular wrist envelope.
+  for(let i=0;i<32;i++){
+    const a=i*Math.PI/16,across=Math.cos(a)*width*.59,along=Math.sin(a)*length*.56;
+    cloud.push({x:centre.x-uy*across+ux*along,y:centre.y+ux*across+uy*along});
+  }
+  for(const index of [5,9,13,17])for(let i=0;i<8;i++){
+    const a=i*Math.PI/4;
+    cloud.push({x:p[index].x+Math.cos(a)*width*.09,y:p[index].y+Math.sin(a)*width*.09});
+  }
+  const palm=convexHull(cloud),capsules=[];
+  const radii={1:.18,5:.17,9:.18,13:.17,17:.14};
+  for(const base of [1,5,9,13,17]){
+    const r=width*radii[base],tip=p[base+3];
+    const nearest=Math.min(...[1,5,9,13,17].filter(b=>b!==base).map(b=>Math.hypot(tip.x-p[b+3].x,tip.y-p[b+3].y)));
+    const tipRadius=Math.min(r*.82,nearest*.44),sizes=[r,r*.95,Math.min(r*.88,tipRadius*1.1),tipRadius];
+    for(let j=0;j<3;j++)capsules.push([p[base+j],p[base+j+1],sizes[j],sizes[j+1]]);
+  }
+  // Thenar mound: join thumb root to the palm without extending the finger tips.
+  const thumbRoot={x:(wrist.x+p[1].x)*.5,y:(wrist.y+p[1].y)*.5};
+  capsules.push([thumbRoot,p[2],width*.25,width*.17]);
+  return {palm,capsules};
+}
+export function handGeometry(points,width=4/3,height=1){
+  return shapeFromJoints(points.map(p=>({x:p.x*width,y:p.y*height})));
+}
+// Orient and fit the complete soft-tissue outline, not only the joint bounds.
 export function landmarksToMask(points,size=257){
   const source=points.map(p=>({x:p.x*4/3,y:p.y}));
   const wrist=source[0],middle=source[9],angle=-Math.PI/2-Math.atan2(middle.y-wrist.y,middle.x-wrist.x);
   const cs=Math.cos(angle),sn=Math.sin(angle);
-  let p=source.map(q=>({x:(q.x-wrist.x)*cs-(q.y-wrist.y)*sn,y:(q.x-wrist.x)*sn+(q.y-wrist.y)*cs}));
-  const pw=Math.hypot(p[5].x-p[17].x,p[5].y-p[17].y);
-  const x0=Math.min(...p.map(q=>q.x))-.15*pw,x1=Math.max(...p.map(q=>q.x))+.15*pw;
-  const y0=Math.min(...p.map(q=>q.y))-.15*pw,y1=Math.max(...p.map(q=>q.y))+.15*pw;
+  const joints=source.map(q=>({x:(q.x-wrist.x)*cs-(q.y-wrist.y)*sn,y:(q.x-wrist.x)*sn+(q.y-wrist.y)*cs}));
+  const shape=shapeFromJoints(joints),extents=shape.palm.slice();
+  for(const[a,b,ra,rb]of shape.capsules)for(const[p,r]of [[a,ra],[b,rb]])
+    extents.push({x:p.x-r,y:p.y-r},{x:p.x+r,y:p.y+r});
+  const x0=Math.min(...extents.map(p=>p.x)),x1=Math.max(...extents.map(p=>p.x));
+  const y0=Math.min(...extents.map(p=>p.y)),y1=Math.max(...extents.map(p=>p.y));
   const scale=.76*(size-1)/Math.max(x1-x0,y1-y0);
-  p=p.map(q=>({x:(q.x-(x0+x1)/2)*scale+(size-1)/2,y:(q.y-(y0+y1)/2)*scale+(size-1)/2}));
-  const width=pw*scale,w=p[0],left={x:w.x-width*.28,y:w.y},right={x:w.x+width*.28,y:w.y};
-  const mcps=[p[5],p[9],p[13],p[17]].sort((a,b)=>a.x-b.x);
-  const palm=[left,...mcps,right],capsules=[];
-  for(const base of [1,5,9,13,17]) for(let j=0;j<3;j++)
-    capsules.push([p[base+j],p[base+j+1],width*(base===1?.13:.105)*(1-j*.13),width*(base===1?.13:.105)*(1-(j+1)*.13)]);
-  capsules.push([p[0],p[2],width*.23,width*.13]);
+  const fit=p=>({x:(p.x-(x0+x1)/2)*scale+(size-1)/2,y:(p.y-(y0+y1)/2)*scale+(size-1)/2});
+  const palm=shape.palm.map(fit),capsules=shape.capsules.map(([a,b,ra,rb])=>[fit(a),fit(b),ra*scale,rb*scale]);
   const mask=new Float32Array(size*size);
   for(let y=0;y<size;y++)for(let x=0;x<size;x++)
     if(inPolygon(x,y,palm)||capsules.some(args=>inCapsule(x,y,...args)))mask[y*size+x]=1;

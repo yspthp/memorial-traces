@@ -25,7 +25,7 @@ export function mountInteraction({setMask,setDepth,getDepth}){
     enter('CONNECT');text('讓你的手掌，留下痕跡。','請允許鏡頭；模型只在本機辨識，不會上傳影像。');
     try{
       await capture.start();if(token!==epoch)return;
-      $('mode').textContent='手部辨識 · v3';enter('READY');
+      $('mode').textContent='掌形預覽 · v4';enter('READY');
       text('請把手掌放入框內。','看見綠色骨架後，自然停留三秒。');
     }catch(error){
       if(token!==epoch)return;
@@ -71,7 +71,7 @@ export function mountInteraction({setMask,setDepth,getDepth}){
     if(['REMOVE','INVITE'].includes(state)&&now-entered>60000){target=0;enter('READY',now);}
     const next=reduced?target:getDepth()+(target-getDepth())*(1-Math.exp(-dt/650));
     setDepth(Math.abs(next-target)<.001?target:next);
-    if(debug)$('debug').textContent=`${state} | depth ${getDepth().toFixed(2)} | ${result?.valid?'21 landmarks':'waiting'} | v3`;
+    if(debug)$('debug').textContent=`${state} | depth ${getDepth().toFixed(2)} | ${result?.valid?'21 landmarks':'waiting'} | v4`;
   }
   $('camera').onclick=start;$('demo').onclick=demo;$('stop').onclick=stop;
   $('replay').onclick=()=>{setDepth(0);target=1;};
