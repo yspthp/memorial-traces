@@ -17,15 +17,17 @@
   h2{font-size:clamp(20px,3.2vw,31px);font-weight:400;letter-spacing:.14em;margin:0 0 12px}
   #message{font-size:clamp(13px,1.7vw,17px);line-height:1.8;letter-spacing:.06em;color:var(--muted);margin:0;min-height:2em}
   #controls{position:fixed;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
-  button{font:12px/1.4 inherit;font-family:inherit;letter-spacing:.08em;border:1px solid #aebbb34d;background:#152021c9;color:var(--ink);padding:10px 17px;border-radius:24px;cursor:pointer}
+  button{font-size:12px;line-height:1.4;font-family:inherit;letter-spacing:.08em;border:1px solid #aebbb34d;background:#152021c9;color:var(--ink);padding:10px 17px;border-radius:24px;cursor:pointer}
   button:hover{background:#344143}button:focus-visible{outline:2px solid #eee3cb;outline-offset:4px}button:disabled{opacity:.5;cursor:wait}
   #camera{background:#eee5d3;color:#293230;border-color:#eee5d3}
   #meter{width:140px;height:2px;background:#ffffff20;margin:15px auto 0}#bar{height:100%;background:#e8d9b8;width:0%;transition:width .15s}
-  #preview{position:fixed;bottom:110px;left:24px;width:128px;border:1px solid #d8dec447;border-radius:7px;background:#132021}
+  #preview-panel{position:fixed;bottom:130px;left:24px;width:240px;border:1px solid #d8dec447;border-radius:10px;background:#132021;overflow:hidden}
+  #preview{display:block;width:100%;height:auto}
+  #tracking-status{margin:8px 10px;font:12px/1.6 system-ui;color:#d7e7df}
   #privacy{position:fixed;left:24px;bottom:8px;font:10px system-ui;color:#93a39c}
   #debug{position:fixed;top:90px;left:24px;font:11px monospace;color:#c6d6b6}
   [hidden]{display:none!important}
-  @media(max-width:600px){header{top:20px;left:20px}h1{font-size:15px}#mode{top:24px;right:18px;font-size:10px}#copy{bottom:120px;left:6%;right:6%}#controls{bottom:40px;gap:6px}button{padding:9px 12px;font-size:11px}#preview{width:80px;left:12px;top:85px;bottom:auto}#privacy{left:0;right:0;text-align:center}}
+  @media(max-width:600px){header{top:20px;left:20px}h1{font-size:15px}#mode{top:24px;right:18px;font-size:10px}#copy{bottom:125px;left:6%;right:6%}#controls{bottom:40px;gap:6px}button{padding:9px 10px;font-size:11px}#preview-panel{width:144px;left:12px;top:84px;bottom:auto}#tracking-status{font-size:10px;margin:5px 7px}#privacy{left:0;right:0;text-align:center}}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 <script type="importmap">{"imports":{"three":"./assets/vendor/three.module.js"}}</script>
@@ -33,24 +35,28 @@
 <body>
 <main id="gl" aria-label="立體石膏板，手印直接凹入表面"></main>
 <header><p>MEMORIAL TRACES / 被珍藏的印記</p><h1>被紀念的痕跡</h1></header>
-<div id="mode">石膏研究 · 02</div>
+<div id="mode">手部辨識 · v3</div>
 <section id="copy" aria-live="polite" aria-atomic="true">
   <h2 id="headline">每一道痕跡，都值得被留下。</h2>
   <p id="message">正在準備石膏表面…</p>
   <div id="meter" hidden><div id="bar"></div></div>
 </section>
-<canvas id="preview" aria-label="鏡像手形預覽；請五指向上，讓完整手掌入鏡" hidden></canvas>
+<aside id="preview-panel" hidden>
+  <canvas id="preview" aria-label="鏡像手部預覽：綠色骨架代表姿勢適合，黃色代表需要調整"></canvas>
+  <p id="tracking-status" role="status">把一隻手放入框內，掌心朝鏡頭。</p>
+</aside>
 <div id="controls">
   <button id="camera" disabled>開始鏡頭體驗</button>
   <button id="demo" disabled>觀看示範</button>
   <button id="replay" hidden>重播顯影</button>
+  <button id="stop" hidden>停止鏡頭</button>
   <button id="fs">全螢幕</button>
 </div>
-<small id="privacy">鏡頭只在本機處理 · 不上傳、不儲存影像</small>
+<small id="privacy">影像不會上傳或儲存 · 首次辨識需連線下載模型</small>
 <output id="debug" hidden></output>
 <noscript>此互動體驗需要 JavaScript。請啟用後重新載入。</noscript>
 <script type="module">
-import('./app.mjs?v=2').catch(error => {
+import('./app.mjs?v=3').catch(error => {
   console.error(error);
   document.getElementById('headline').textContent='未能啟動立體畫面';
   document.getElementById('message').textContent='請使用支援 WebGL 的瀏覽器，並重新載入頁面。';
