@@ -1,4 +1,5 @@
 import { clamp } from './relief.mjs';
+export const HOLD_DURATION_MS = 10000;
 export const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 const dist = (a,b) => Math.hypot((a.x-b.x)*4/3,a.y-b.y);
 export function assessHands(hands) {
@@ -28,7 +29,7 @@ export function smoothPoints(previous,points) {
 }
 // Only fresh, stable samples count. Brief losses PAUSE; they never count as held time.
 export class HoldGate {
-  constructor(required=3000,grace=900){this.required=required;this.grace=grace;this.reset();}
+  constructor(required=HOLD_DURATION_MS,grace=900){this.required=required;this.grace=grace;this.reset();}
   reset(){this.elapsed=0;this.last=null;this.lastGood=null;this.wasGood=false;}
   update(now,good){
     const dt=this.last===null?0:Math.min(200,Math.max(0,now-this.last));
@@ -37,6 +38,13 @@ export class HoldGate {
     this.wasGood=good;this.last=now;
     return {progress:clamp(this.elapsed/this.required),complete:this.elapsed>=this.required};
   }
+}
+// Dynamic pressing depth during the 10-second hold: rises and fluctuates before rebounding to a shallow trace.
+export function captureDepthAt(elapsed,clock=elapsed,required=HOLD_DURATION_MS){
+  const progress=clamp(elapsed/Math.max(1,required));
+  const ramp=clamp(Math.max(elapsed,clock)/450,.25,1);
+  const wave=.26*Math.sin(clock*.0026)+.14*Math.sin(clock*.0061+1.2);
+  return clamp(ramp*(.56+.12*progress+wave),.24,.94);
 }
 function inPolygon(x,y,poly){
   let inside=false;
@@ -107,7 +115,14 @@ export function landmarksToMask(points,size=257){
   const fit=p=>({x:(p.x-(x0+x1)/2)*scale+(size-1)/2,y:(p.y-(y0+y1)/2)*scale+(size-1)/2});
   const palm=shape.palm.map(fit),capsules=shape.capsules.map(([a,b,ra,rb])=>[fit(a),fit(b),ra*scale,rb*scale]);
   const mask=new Float32Array(size*size);
-  for(let y=0;y<size;y++)for(let x=0;x<size;x++)
-    if(inPolygon(x,y,palm)||capsules.some(args=>inCapsule(x,y,...args)))mask[y*size+x]=1;
+  const px0=Math.max(0,Math.floor(Math.min(...palm.map(p=>p.x)))),px1=Math.min(size-1,Math.ceil(Math.max(...palm.map(p=>p.x))));
+  const py0=Math.max(0,Math.floor(Math.min(...palm.map(p=>p.y)))),py1=Math.min(size-1,Math.ceil(Math.max(...palm.map(p=>p.y))));
+  for(let y=py0;y<=py1;y++)for(let x=px0;x<=px1;x++)if(inPolygon(x,y,palm))mask[y*size+x]=1;
+  for(const[a,b,ra,rb]of capsules){
+    const r=Math.max(ra,rb);
+    const cx0=Math.max(0,Math.floor(Math.min(a.x,b.x)-r)),cx1=Math.min(size-1,Math.ceil(Math.max(a.x,b.x)+r));
+    const cy0=Math.max(0,Math.floor(Math.min(a.y,b.y)-r)),cy1=Math.min(size-1,Math.ceil(Math.max(a.y,b.y)+r));
+    for(let y=cy0;y<=cy1;y++)for(let x=cx0;x<=cx1;x++)if(!mask[y*size+x]&&inCapsule(x,y,a,b,ra,rb))mask[y*size+x]=1;
+  }
   return mask;
 }

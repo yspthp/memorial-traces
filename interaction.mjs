@@ -1,5 +1,5 @@
 import {Capture} from './capture-landmarks.mjs';
-import {HoldGate,landmarksToMask} from './hand-shape.mjs';
+import {HoldGate,HOLD_DURATION_MS,captureDepthAt,landmarksToMask} from './hand-shape.mjs';
 import {demoMask} from './relief.mjs';
 import {revealCopyAt} from './reveal-copy.mjs';
 export function mountInteraction({setMask,setDepth,getDepth}){
@@ -7,7 +7,7 @@ export function mountInteraction({setMask,setDepth,getDepth}){
   const debug=params.get('debug')==='1',reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
   let mode='home',state='HOME',entered=performance.now(),lastTick=entered,target=0,epoch=0,waiting=false;
   let since=null,absent=null,result=null;
-  const hold=new HoldGate(),capture=new Capture($('preview'),message=>{if(mode==='camera')text('正在準備手部辨識。',message);});
+  const hold=new HoldGate(HOLD_DURATION_MS),capture=new Capture($('preview'),message=>{if(mode==='camera')text('正在準備手部辨識。',message);});
   function text(title,message){if($('headline').textContent!==title)$('headline').textContent=title;if($('message').textContent!==message)$('message').textContent=message;}
   function enter(next,now=performance.now()){
     state=next;entered=now;since=absent=null;hold.reset();
@@ -43,14 +43,26 @@ export function mountInteraction({setMask,setDepth,getDepth}){
     $('tracking-status').textContent=det.reason;
     if(state==='READY'){
       text('請自然張開五指。',det.reason);
-      if(valid){since??=now;if(now-since>350)enter('CAPTURE',now);}else since=null;
+      if(valid){
+        since??=now;
+        if(now-since>350){
+          enter('CAPTURE',now);
+          setMask(landmarksToMask(det.points),{phase:0,progress:0},false);
+          target=captureDepthAt(0,0,hold.required);
+        }
+      }else since=null;
     }else if(state==='CAPTURE'){
       const steady=valid&&det.motion<.14,status=hold.update(now,steady);
       $('bar').style.width=`${status.progress*100}%`;
+      if(det.points){
+        setMask(landmarksToMask(det.points),{phase:now-entered,progress:status.progress},false);
+      }
+      target=present?captureDepthAt(hold.elapsed,now-entered,hold.required):0;
+      const remainSec=Math.max(0,Math.ceil((hold.required/1000)*(1-status.progress)));
       text(steady?'請將手掌放下。用力一點。':'慢慢來，進度會暫時保留。',
-        steady?`自然停留即可，尚餘 ${Math.max(0,Math.ceil(3*(1-status.progress)))} 秒。`:valid?'手掌移動較大，請稍稍停留。':det.reason);
-      if(status.complete){setMask(landmarksToMask(det.points));target=.12;enter('LOSS',now);}
-      else if(now-entered>30000)enter('READY',now);
+        steady?`自然停留即可，尚餘 ${remainSec} 秒。`:valid?'手掌移動較大，請稍稍停留。':det.reason);
+      if(status.complete){setMask(landmarksToMask(det.points),null,false);target=.12;enter('LOSS',now);}
+      else if(now-entered>45000){target=0;enter('READY',now);}
     }else if(state==='REMOVE'){
       text('請先把手掌移開。','讓這一道淡淡的痕跡，停留片刻。');
       if(!present){absent??=now;if(now-absent>700)enter('INVITE',now);}else absent=null;
@@ -69,6 +81,9 @@ export function mountInteraction({setMask,setDepth,getDepth}){
         if(!waiting&&now-capture.lastAt>6000)throw Error('No fresh inference results');
       }catch{stop();text('手部辨識已暫停。','鏡頭或辨識程序中斷；請重新開始，或觀看示範。');}
     }
+    if(state==='CAPTURE'&&result?.present){
+      target=captureDepthAt(hold.elapsed,now-entered,hold.required);
+    }
     if(state==='LOSS'){text('這麼用力，卻只有淡淡的痕跡嗎？','請慢慢移開手掌。');if(now-entered>4000)enter('REMOVE',now);}
     if(state==='REVEAL'||state==='DEMO'){
       const copy=revealCopyAt(now-entered,reduced);
@@ -79,7 +94,8 @@ export function mountInteraction({setMask,setDepth,getDepth}){
     }
     if(state==='FADE'&&now-entered>3500)enter('READY',now);
     if(['REMOVE','INVITE'].includes(state)&&now-entered>60000){target=0;enter('READY',now);}
-    const next=reduced?target:getDepth()+(target-getDepth())*(1-Math.exp(-dt/650));
+    const tau=state==='CAPTURE'?160:650;
+    const next=reduced?target:getDepth()+(target-getDepth())*(1-Math.exp(-dt/tau));
     setDepth(Math.abs(next-target)<.001?target:next);
     if(debug)$('debug').textContent=`${state} | depth ${getDepth().toFixed(2)} | ${result?.valid?'21 landmarks':'waiting'} | v4.1`;
   }

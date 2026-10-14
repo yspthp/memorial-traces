@@ -116,7 +116,7 @@ function setDepth(value) {
 }
 setDepth(0);
 controls=mountInteraction({
-  setMask(mask){field=makeRelief(mask,N);amount=-1;setDepth(0);},
+  setMask(mask,pressure=null,reset=true){field=makeRelief(mask,N,pressure);const d=reset?0:Math.max(0,amount);amount=-1;setDepth(d);},
   setDepth,getDepth:()=>amount
 });
 function tick(now){

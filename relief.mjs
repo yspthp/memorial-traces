@@ -20,28 +20,59 @@ export function fitMask(mask, w, h, size = 257) {
   }
   return out;
 }
-export function distance(mask, w, h, inside = true) {
+export function distance(mask, w, h, inside = true, b = null) {
   const d = new Float32Array(w * h);
-  for (let i = 0; i < d.length; i++) d[i] = (mask[i] > .5) === inside ? w + h : 0;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = y * w + x;
-    if (x) d[i] = Math.min(d[i], d[i - 1] + 1);
-    if (y) d[i] = Math.min(d[i], d[i - w] + 1);
-    if (x && y) d[i] = Math.min(d[i], d[i - w - 1] + Math.SQRT2);
-    if (x < w - 1 && y) d[i] = Math.min(d[i], d[i - w + 1] + Math.SQRT2);
+  const inf = w + h;
+  const x0 = b ? Math.max(0, b.x0 - 8) : 0, x1 = b ? Math.min(w - 1, b.x1 + 8) : w - 1;
+  const y0 = b ? Math.max(0, b.y0 - 8) : 0, y1 = b ? Math.min(h - 1, b.y1 + 8) : h - 1;
+  for (let y = y0; y <= y1; y++) {
+    const row = y * w;
+    for (let x = x0; x <= x1; x++) {
+      const i = row + x;
+      d[i] = (mask[i] > .5) === inside ? inf : 0;
+    }
   }
-  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) {
-    const i = y * w + x;
-    if (x < w - 1) d[i] = Math.min(d[i], d[i + 1] + 1);
-    if (y < h - 1) d[i] = Math.min(d[i], d[i + w] + 1);
-    if (x < w - 1 && y < h - 1) d[i] = Math.min(d[i], d[i + w + 1] + Math.SQRT2);
-    if (x && y < h - 1) d[i] = Math.min(d[i], d[i + w - 1] + Math.SQRT2);
+  const SQRT2 = Math.SQRT2;
+  for (let y = y0; y <= y1; y++) {
+    const row = y * w;
+    for (let x = x0; x <= x1; x++) {
+      const i = row + x;
+      let v = d[i];
+      if (v === 0) continue;
+      if (x > x0 && d[i - 1] + 1 < v) v = d[i - 1] + 1;
+      if (y > y0) {
+        if (d[i - w] + 1 < v) v = d[i - w] + 1;
+        if (x > x0 && d[i - w - 1] + SQRT2 < v) v = d[i - w - 1] + SQRT2;
+        if (x < x1 && d[i - w + 1] + SQRT2 < v) v = d[i - w + 1] + SQRT2;
+      }
+      d[i] = v;
+    }
+  }
+  for (let y = y1; y >= y0; y--) {
+    const row = y * w;
+    for (let x = x1; x >= x0; x--) {
+      const i = row + x;
+      let v = d[i];
+      if (v === 0) continue;
+      if (x < x1 && d[i + 1] + 1 < v) v = d[i + 1] + 1;
+      if (y < y1) {
+        if (d[i + w] + 1 < v) v = d[i + w] + 1;
+        if (x < x1 && d[i + w + 1] + SQRT2 < v) v = d[i + w + 1] + SQRT2;
+        if (x > x0 && d[i + w - 1] + SQRT2 < v) v = d[i + w - 1] + SQRT2;
+      }
+      d[i] = v;
+    }
   }
   return d;
 }
 function segment(x, y, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay, t = clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1));
   return Math.hypot(x - ax - t * dx, y - ay - t * dy);
+}
+function segmentSq(x, y, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, t = clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1));
+  const rx = x - ax - t * dx, ry = y - ay - t * dy;
+  return rx * rx + ry * ry;
 }
 export function demoMask(size = 257) {
   const m = new Float32Array(size * size);
@@ -64,32 +95,57 @@ const creases = [
   [[.34, .60], [.40, .68], [.42, .78], [.37, .89], [.30, .94]],
   [[.56, .63], [.54, .73], [.58, .83], [.53, .95]]
 ];
-export function makeRelief(mask, size) {
+const flatCreases = [];
+for (const path of creases) for (let k = 1; k < path.length; k++)
+  flatCreases.push([path[k - 1][0], path[k - 1][1], path[k][0], path[k][1]]);
+
+export function makeRelief(mask, size, pressure = null) {
   const field = new Float32Array(size * size), b = bounds(mask, size, size);
   if (!b) return field;
-  const di = distance(mask, size, size), dout = distance(mask, size, size, false);
+  const di = distance(mask, size, size, true, b), dout = distance(mask, size, size, false, b);
   const gaussian = (u, v, x, y, rx, ry) => Math.exp(-(((u - x) / rx) ** 2 + ((v - y) / ry) ** 2));
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+  const yMin = Math.max(1, b.y0 - 7), yMax = Math.min(size - 2, b.y1 + 7);
+  const xMin = Math.max(1, b.x0 - 7), xMax = Math.min(size - 2, b.x1 + 7);
+  const hasPressure = pressure !== null && typeof pressure === 'object';
+  const ph = hasPressure ? (pressure.phase ?? 0) * .001 : 0;
+  for (let y = yMin; y <= yMax; y++) for (let x = xMin; x <= xMax; x++) {
     const i = y * size + x;
     if (!mask[i] && dout[i] > 6) continue;
     const u = (x - b.x0) / b.width, v = (y - b.y0) / b.height;
     const edge = smooth(0, 5.5 * size / 257, di[i]);
-    const depth = .044 + .025 * (1 - Math.exp(-di[i] / (7 * size / 257))) + .043 * gaussian(u, v, .34, .78, .20, .22)
+    let depth = .044 + .025 * (1 - Math.exp(-di[i] / (7 * size / 257))) + .043 * gaussian(u, v, .34, .78, .20, .22)
       + .027 * gaussian(u, v, .66, .83, .17, .18) - .018 * gaussian(u, v, .53, .66, .16, .16);
-    let line = 1;
-    for (const path of creases) for (let k = 1; k < path.length; k++)
-      line = Math.min(line, segment(u, v, ...path[k - 1], ...path[k]));
+    let rimMul = 1;
+    if (hasPressure) {
+      // Uneven, shifting real-time pressure across fingertips, knuckles, and palm mounds
+      const tipPress = v < .48 ? (.42 + .28 * Math.sin(ph * 2.7 + u * 6.4)) * Math.exp(-(((v - .22) / .19) ** 2)) : 0;
+      const palmWave = .34 * Math.sin(ph * 2.2 + u * 4.8 - v * 3.6) + .20 * Math.cos(ph * 3.5 - u * 5.4 + v * 4.2);
+      const hollow = -.36 * gaussian(u, v, .50, .66, .18, .17);
+      const localMul = clamp(1 + tipPress + palmWave + hollow, .30, 1.55);
+      depth *= localMul;
+      rimMul = .7 + .3 * localMul;
+    }
+    let lineSq = 1;
+    for (let s = 0; s < flatCreases.length; s++) {
+      const c = flatCreases[s];
+      const dSq = segmentSq(u, v, c[0], c[1], c[2], c[3]);
+      if (dSq < lineSq) lineSq = dSq;
+    }
     // Transverse folds are restricted to the fingers, never drawn over empty plaster.
-    const folds = v < .49 ? [.20, .36, .48].reduce((sum, joint) =>
-      sum + .0035 * Math.exp(-(((v - joint + .018 * Math.sin(u * 14)) / .006) ** 2)), 0) : 0;
-    const detail = .007 * Math.exp(-((line / .008) ** 2)) + folds;
+    const s14 = .018 * Math.sin(u * 14);
+    const folds = v < .49 ? .0035 * (
+      Math.exp(-(((v - .20 + s14) / .006) ** 2)) +
+      Math.exp(-(((v - .36 + s14) / .006) ** 2)) +
+      Math.exp(-(((v - .48 + s14) / .006) ** 2))
+    ) : 0;
+    const detail = .007 * Math.exp(-(lineSq / (.008 * .008))) + folds;
     const irregularity = Math.sin(x * .83 + Math.sin(y * .37)) * Math.sin(y * .65 + x * .13);
-    const rim = .010 * Math.exp(-(((di[i] + dout[i]) / (2.4 * size / 257)) ** 2)) * (.8 + .2 * irregularity);
+    const rim = .010 * rimMul * Math.exp(-(((di[i] + dout[i]) / (2.4 * size / 257)) ** 2)) * (.8 + .2 * irregularity);
     field[i] = -depth * edge + detail * edge + rim + .0003 * irregularity * edge;
   }
   // A small geometric filter removes pixel stair-steps, without enlarging the mask.
   const source = field.slice();
-  for (let y = 1; y < size - 1; y++) for (let x = 1; x < size - 1; x++) {
+  for (let y = yMin; y <= yMax; y++) for (let x = xMin; x <= xMax; x++) {
     const i = y * size + x;
     field[i] = (source[i] * 4 + (source[i - 1] + source[i + 1] + source[i - size] + source[i + size]) * 2
       + source[i - size - 1] + source[i - size + 1] + source[i + size - 1] + source[i + size + 1]) / 16;
