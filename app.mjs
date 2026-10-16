@@ -15,11 +15,13 @@ renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadow
 $('gl').appendChild(renderer.domElement);
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); controls?.stop();
-  $('headline').textContent='立體畫面暫時中斷'; $('message').textContent='請重新載入頁面，再開始體驗。';
+  $('headline').textContent = '立體畫面暫時中斷';
+  $('message').textContent = '請重新載入頁面，再開始體驗。';
 });
 const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(34, 1, .1, 35);
 scene.fog = new THREE.Fog(0x172122, 10, 23);
-scene.add(new THREE.HemisphereLight(0xe5edf1, 0x41443d, 1.15));
+const hemi = new THREE.HemisphereLight(0xe5edf1, 0x41443d, 1.15);
+scene.add(hemi);
 const key = new THREE.DirectionalLight(0xffefd5, 3.1);
 key.position.set(-3.5, 4.8, 3); key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -101,29 +103,64 @@ function resize() {
 }
 addEventListener('resize', resize); resize();
 
-let field = makeRelief(demoMask(N), N), amount = -1;
-function setDepth(value) {
-  if (value === amount) return;
+let field = makeRelief(demoMask(N), N), amount = -1, effortTint = 0, appliedTint = -1;
+function updateSurface(value = amount, tint = effortTint) {
+  if (value === amount && tint === appliedTint) return;
   amount = value;
+  appliedTint = tint;
+  const clampedTint = clamp(tint, 0, 1);
   for (let i = 0; i < pos.count; i++) {
     pos.setZ(i, base[i] + field[i] * value);
-    // Restrained cavity darkening, never orange emission or a rectangular decal.
-    const shade = 1 - clamp(-field[i] / .11) * .12 * value;
-    color[i * 3] = shade; color[i * 3 + 1] = shade; color[i * 3 + 2] = shade;
+    const cavity = clamp(-field[i] / .11) * value;
+    const shade = 1 - cavity * .14;
+    // Stage 2 pressing feedback: faint reddish trace inside the plaster recess that fades away when released
+    const blush = clamp(-field[i] / .085) * clampedTint * .42;
+    color[i * 3] = clamp(shade + blush * .18, 0, 1);
+    color[i * 3 + 1] = clamp(shade - blush * .72, 0, 1);
+    color[i * 3 + 2] = clamp(shade - blush * .78, 0, 1);
   }
   pos.needsUpdate = true; geometry.attributes.color.needsUpdate = true;
   geometry.computeVertexNormals(); geometry.computeBoundingSphere();
 }
+function setDepth(value) {
+  updateSurface(value, effortTint);
+}
+function setEffortTint(tint) {
+  effortTint = clamp(tint, 0, 1);
+  updateSurface(amount, effortTint);
+}
+function setPerspective(mode) {
+  if (mode === 'grace') {
+    key.color.setHex(0xfff2da);
+    key.intensity = 3.45;
+    fill.color.setHex(0xdce8ef);
+    group.rotation.set(-.018, -.08, -.01);
+  } else {
+    key.color.setHex(0xffefd5);
+    key.intensity = 3.1;
+    fill.color.setHex(0xcbdde6);
+    group.rotation.set(-.025, -.14, -.018);
+  }
+}
 setDepth(0);
-controls=mountInteraction({
-  setMask(mask,pressure=null,reset=true){field=makeRelief(mask,N,pressure);const d=reset?0:Math.max(0,amount);amount=-1;setDepth(d);},
-  setDepth,getDepth:()=>amount
+controls = mountInteraction({
+  setMask(mask, pressure = null, reset = true) {
+    field = makeRelief(mask, N, pressure);
+    const d = reset ? 0 : Math.max(0, amount);
+    amount = -1;
+    updateSurface(d, effortTint);
+  },
+  setDepth,
+  getDepth: () => amount,
+  setEffortTint,
+  getEffortTint: () => effortTint,
+  setPerspective
 });
-function tick(now){
+function tick(now) {
   requestAnimationFrame(tick);
   controls.tick(now);
-  if(!document.hidden)renderer.render(scene,camera);
+  if (!document.hidden) renderer.render(scene, camera);
 }
 requestAnimationFrame(tick);
-if('serviceWorker' in navigator && isSecureContext)
-  navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('Offline cache unavailable',e));
+if ('serviceWorker' in navigator && isSecureContext)
+  navigator.serviceWorker.register('./sw.js').catch(e => console.warn('Offline cache unavailable', e));

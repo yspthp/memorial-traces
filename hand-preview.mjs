@@ -6,7 +6,14 @@ export function drawHandPreview(ctx,points,valid=false){
   ctx.fillStyle='#132021';ctx.fillRect(0,0,width,height);
   ctx.strokeStyle='#627b73';ctx.lineWidth=1;ctx.setLineDash([6,5]);
   ctx.strokeRect(width*.05,height*.05,width*.9,height*.9);ctx.setLineDash([]);
-  if(!points)return;
+  if(!points){
+    // Draw subtle palm contour guide frame when waiting for user's hand
+    ctx.strokeStyle='#627b7366';ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.arc(width*.5,height*.62,Math.min(width,height)*.18,0,Math.PI*2);
+    ctx.stroke();
+    return;
+  }
   const {palm,capsules}=handGeometry(points,width,height);
   ctx.fillStyle=valid?'#285e50':'#665333';
   ctx.beginPath();palm.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fill();
