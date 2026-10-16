@@ -1,7 +1,14 @@
 import {Capture} from './capture-landmarks.mjs';
 import {HoldGate,HOLD_DURATION_MS,captureDepthAt,landmarksToMask} from './hand-shape.mjs';
 import {demoMask,bounds} from './relief.mjs';
-import {STORYBOARD_COPY,REVEAL_COPY_TIMING,lossCopyAt,revealCopyAt,demoCopy} from './reveal-copy.mjs';
+import {
+  STORYBOARD_COPY,
+  REVEAL_COPY_TIMING,
+  graceDepthAt,
+  lossCopyAt,
+  revealCopyAt,
+  demoCopy
+} from './reveal-copy.mjs';
 
 function renderSnapshotToCanvas(targetCanvas, snapshot, mask, { mode = 'effort', fadeProgress = 1 } = {}) {
   if (!targetCanvas) return;
@@ -73,7 +80,6 @@ export function mountInteraction({
   let since = null, absent = null, result = null;
   let graceHoldTimer = null, graceHoldUnlocked = false;
 
-  // Recorded user journey state (masks, key-frame preview snapshots, and depth/tint timeline frames)
   const journeyState = {
     effortMask: demoMask(257),
     graceMask: demoMask(257),
@@ -118,7 +124,6 @@ export function mountInteraction({
     }
   }
 
-  // Addendum Item 2: Dynamically render #replay button in the DOM ONLY in Stage 5 (END / REPLAY)
   function syncReplayButtonDOM(next) {
     const controlsEl = $('controls');
     if (!controlsEl) return;
@@ -143,7 +148,6 @@ export function mountInteraction({
     }
   }
 
-  // Addendum Item 4: Stage 5 release prompt UI Overlay on camera preview
   function syncPreviewOverlay(next) {
     const panel = $('preview-panel');
     const overlay = $('preview-complete-overlay');
@@ -274,7 +278,7 @@ export function mountInteraction({
     $('headline').style.opacity = '0';
   }
 
-  // Addendum Item 3: Stage 4 uses explicit setTimeout lock (>= 3500ms, set to 4000ms) so the clear imprint is forced to stay on screen
+  // Stage 4: Slowly emerge palm print over 5500ms (>= 5s) and hold for 10000ms with setTimeout lock
   function startGraceReveal(now, points) {
     if (points) {
       journeyState.graceMask = landmarksToMask(points);
@@ -286,16 +290,17 @@ export function mountInteraction({
       depth: 1.18
     });
     setMask(journeyState.graceMask, null, false);
-    target = 1.18;
+    setDepth(.08);
+    target = .08;
     targetTint = 0;
     graceHoldUnlocked = false;
     $('mode').textContent = '階段四 · 永恆印記';
     enter('REVEAL', now);
-    const copy = revealCopyAt(0, reduced);
-    setCopy(copy.title, copy.message, false, copy.scripture);
+    setCopy('', '');
+    $('headline').style.opacity = '0';
     graceHoldTimer = setTimeout(() => {
       graceHoldUnlocked = true;
-    }, Math.max(3500, REVEAL_COPY_TIMING.graceHoldDuration));
+    }, REVEAL_COPY_TIMING.graceHoldDuration);
   }
 
   function startJourneyReplay() {
@@ -427,14 +432,21 @@ export function mountInteraction({
       }
     } else if (state === 'REVEAL') {
       const elapsed = now - entered;
+      // Palm print slowly emerges over 5.5 seconds (>= 5 seconds)
+      target = graceDepthAt(elapsed, 1.18, REVEAL_COPY_TIMING.graceDevelopDuration);
       const copy = revealCopyAt(elapsed, reduced);
       setCopy(copy.title, copy.message, false, copy.scripture);
       $('headline').style.opacity = String(copy.titleOpacity);
-      if (copy.stage === 'STAGE_5_END' && graceHoldUnlocked && elapsed >= 3500) {
+      if (
+        copy.stage === 'STAGE_5_END' &&
+        graceHoldUnlocked &&
+        elapsed >= REVEAL_COPY_TIMING.graceHoldDuration
+      ) {
         $('mode').textContent = '階段五 · 啟示與結束';
         enter('END', now);
       }
     } else if (state === 'END') {
+      target = 1.18;
       const copy = revealCopyAt(REVEAL_COPY_TIMING.graceHoldDuration + (now - entered), reduced);
       setCopy(copy.title, copy.message, false, copy.scripture);
       $('headline').style.opacity = String(copy.titleOpacity);
@@ -442,7 +454,7 @@ export function mountInteraction({
     } else if (state === 'REPLAY') {
       const elapsed = now - entered;
       const effortCard = $('replay-card-effort'), graceCard = $('replay-card-grace');
-      if (elapsed < 1800) {
+      if (elapsed < 2200) {
         target = .82;
         targetTint = .85;
         setCopy(STORYBOARD_COPY.stage2Pressing, '');
@@ -452,8 +464,8 @@ export function mountInteraction({
         });
         effortCard?.classList.add('active');
         graceCard?.classList.remove('active');
-      } else if (elapsed < 4200) {
-        const fadeP = Math.min(1, (elapsed - 1800) / 2000);
+      } else if (elapsed < 5200) {
+        const fadeP = Math.min(1, (elapsed - 2200) / 2500);
         target = .12;
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage2Faded, '');
@@ -463,17 +475,18 @@ export function mountInteraction({
         });
         effortCard?.classList.add('active');
         graceCard?.classList.remove('active');
-      } else if (elapsed < 5700) {
+      } else if (elapsed < 7200) {
         target = .12;
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage3Title, STORYBOARD_COPY.stage3Subtitle);
         effortCard?.classList.remove('active');
         graceCard?.classList.remove('active');
-      } else if (elapsed < 9200) {
-        if (target < 1) {
+      } else if (elapsed < 13500) {
+        const graceElapsed = elapsed - 7200;
+        if (graceElapsed < 100) {
           setMask(journeyState.graceMask, null, false);
         }
-        target = 1.18;
+        target = graceDepthAt(graceElapsed, 1.18, REVEAL_COPY_TIMING.graceDevelopDuration);
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage4Grace, '');
         renderSnapshotToCanvas($('replay-grace-canvas'), journeyState.graceSnapshot, journeyState.graceMask, {
@@ -495,7 +508,7 @@ export function mountInteraction({
       $('headline').style.opacity = '1';
     }
 
-    const tau = state === 'CAPTURE' ? 160 : state === 'REVEAL' ? 220 : 650;
+    const tau = state === 'CAPTURE' ? 160 : state === 'REVEAL' ? 260 : 650;
     const nextDepth = reduced ? target : getDepth() + (target - getDepth()) * (1 - Math.exp(-dt / tau));
     setDepth(Math.abs(nextDepth - target) < .001 ? target : nextDepth);
 
@@ -504,7 +517,7 @@ export function mountInteraction({
     setEffortTint(Math.abs(nextTint - targetTint) < .001 ? targetTint : nextTint);
 
     if (debug) {
-      $('debug').textContent = `${state} | depth ${getDepth().toFixed(2)} | tint ${getEffortTint().toFixed(2)} | ${result?.valid ? '21 landmarks' : 'waiting'} | v5.1`;
+      $('debug').textContent = `${state} | depth ${getDepth().toFixed(2)} | tint ${getEffortTint().toFixed(2)} | ${result?.valid ? '21 landmarks' : 'waiting'} | v5.2`;
     }
   }
 

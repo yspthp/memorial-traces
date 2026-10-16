@@ -1,4 +1,4 @@
-const CACHE = 'memorial-traces-v5.1';
+const CACHE = 'memorial-traces-v5.2';
 const PREFIXES = ['mt-', 'memorial-traces-'];
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
