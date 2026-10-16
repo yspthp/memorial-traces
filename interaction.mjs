@@ -3,13 +3,28 @@ import {HoldGate,HOLD_DURATION_MS,captureDepthAt,landmarksToMask} from './hand-s
 import {demoMask,bounds} from './relief.mjs';
 import {STORYBOARD_COPY,REVEAL_COPY_TIMING,lossCopyAt,revealCopyAt,demoCopy} from './reveal-copy.mjs';
 
-function drawMaskComparison(canvas, mask, { mode = 'effort' } = {}) {
-  if (!canvas || !mask) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height, size = Math.round(Math.sqrt(mask.length));
+function renderSnapshotToCanvas(targetCanvas, snapshot, mask, { mode = 'effort', fadeProgress = 1 } = {}) {
+  if (!targetCanvas) return;
+  const ctx = targetCanvas.getContext('2d');
+  const w = targetCanvas.width, h = targetCanvas.height;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = mode === 'grace' ? '#1c2625' : '#161f20';
   ctx.fillRect(0, 0, w, h);
+
+  if (snapshot instanceof ImageData) {
+    const temp = document.createElement('canvas');
+    temp.width = snapshot.width;
+    temp.height = snapshot.height;
+    temp.getContext('2d').putImageData(snapshot, 0, 0);
+    ctx.save();
+    ctx.globalAlpha = mode === 'effort' ? Math.max(0.28, 1 - 0.65 * fadeProgress) : 1;
+    ctx.drawImage(temp, 0, 0, w, h);
+    ctx.restore();
+    return;
+  }
+
+  if (!mask) return;
+  const size = Math.round(Math.sqrt(mask.length));
   const b = bounds(mask, size, size);
   if (!b) return;
   const img = ctx.createImageData(w, h);
@@ -21,17 +36,16 @@ function drawMaskComparison(canvas, mask, { mode = 'effort' } = {}) {
       const idx = (y * w + x) * 4;
       if (v > 0.5) {
         if (mode === 'effort') {
-          // Faint, faded shallow trace with a hint of residual warmth
-          img.data[idx] = 188;
-          img.data[idx + 1] = 166;
-          img.data[idx + 2] = 158;
-          img.data[idx + 3] = 78;
+          const alpha = Math.round(190 * (1 - 0.62 * fadeProgress));
+          img.data[idx] = 206;
+          img.data[idx + 1] = 152;
+          img.data[idx + 2] = 146;
+          img.data[idx + 3] = alpha;
         } else {
-          // Deep, crisp, eternal imprint
           img.data[idx] = 242;
           img.data[idx + 1] = 231;
           img.data[idx + 2] = 208;
-          img.data[idx + 3] = 235;
+          img.data[idx + 3] = 240;
         }
       } else {
         img.data[idx] = mode === 'grace' ? 28 : 22;
@@ -57,7 +71,17 @@ export function mountInteraction({
   let mode = 'home', state = 'HOME', entered = performance.now(), lastTick = entered;
   let target = 0, targetTint = 0, epoch = 0, waiting = false;
   let since = null, absent = null, result = null;
-  let lastEffortMask = demoMask(257), lastGraceMask = demoMask(257);
+  let graceHoldTimer = null, graceHoldUnlocked = false;
+
+  // Recorded user journey state (masks, key-frame preview snapshots, and depth/tint timeline frames)
+  const journeyState = {
+    effortMask: demoMask(257),
+    graceMask: demoMask(257),
+    effortSnapshot: null,
+    graceSnapshot: null,
+    effortFrames: [],
+    graceFrames: []
+  };
 
   const hold = new HoldGate(HOLD_DURATION_MS);
   const capture = new Capture($('preview'), () => {
@@ -65,6 +89,17 @@ export function mountInteraction({
       setCopy(STORYBOARD_COPY.stage1Title, STORYBOARD_COPY.stage1SubtitleHtml, true);
     }
   });
+
+  function capturePreviewSnapshot() {
+    const previewCanvas = $('preview');
+    if (!previewCanvas || !previewCanvas.width || !previewCanvas.height) return null;
+    try {
+      const ctx = previewCanvas.getContext('2d');
+      return ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+    } catch {
+      return null;
+    }
+  }
 
   function setCopy(title, message = '', isHtml = false, scripture = '') {
     const h = $('headline'), m = $('message'), s = $('scripture');
@@ -83,6 +118,44 @@ export function mountInteraction({
     }
   }
 
+  // Addendum Item 2: Dynamically render #replay button in the DOM ONLY in Stage 5 (END / REPLAY)
+  function syncReplayButtonDOM(next) {
+    const controlsEl = $('controls');
+    if (!controlsEl) return;
+    let replayBtn = $('replay');
+    const shouldRenderInDOM = next === 'END' || next === 'REPLAY';
+    if (shouldRenderInDOM) {
+      if (!replayBtn) {
+        replayBtn = document.createElement('button');
+        replayBtn.id = 'replay';
+        replayBtn.type = 'button';
+        replayBtn.textContent = STORYBOARD_COPY.replayButton;
+        replayBtn.onclick = startJourneyReplay;
+        const stopBtn = $('stop');
+        if (stopBtn && stopBtn.parentNode === controlsEl) {
+          controlsEl.insertBefore(replayBtn, stopBtn);
+        } else {
+          controlsEl.appendChild(replayBtn);
+        }
+      }
+    } else if (replayBtn) {
+      replayBtn.remove();
+    }
+  }
+
+  // Addendum Item 4: Stage 5 release prompt UI Overlay on camera preview
+  function syncPreviewOverlay(next) {
+    const panel = $('preview-panel');
+    const overlay = $('preview-complete-overlay');
+    const isComplete = next === 'END' || next === 'REPLAY';
+    if (panel) {
+      panel.classList.toggle('saved-complete', isComplete);
+    }
+    if (overlay) {
+      overlay.hidden = !isComplete;
+    }
+  }
+
   function updateStageAttributes(next) {
     document.body.dataset.stage = next;
     const isGraceView = ['INVITE', 'REVEAL', 'END', 'REPLAY'].includes(next);
@@ -97,9 +170,15 @@ export function mountInteraction({
     if (veil) {
       veil.classList.toggle('active', next === 'INVITE');
     }
+    syncReplayButtonDOM(next);
+    syncPreviewOverlay(next);
   }
 
   function enter(next, now = performance.now()) {
+    if (graceHoldTimer && next !== 'REVEAL') {
+      clearTimeout(graceHoldTimer);
+      graceHoldTimer = null;
+    }
     state = next;
     entered = now;
     since = absent = null;
@@ -114,8 +193,6 @@ export function mountInteraction({
     $('bar').style.width = '0%';
     $('preview-panel').hidden = mode !== 'camera';
     $('stop').hidden = mode !== 'camera';
-    // Action Item 2: Never show replay button in demo mode; only show in Stage 5 (END) or REPLAY
-    $('replay').hidden = !(next === 'END' || next === 'REPLAY');
     if ($('journey-replay') && next !== 'REPLAY' && next !== 'END') {
       $('journey-replay').hidden = true;
     }
@@ -134,7 +211,6 @@ export function mountInteraction({
     setCopy(STORYBOARD_COPY.stage1Title, STORYBOARD_COPY.stage1SubtitleHtml, true);
   }
 
-  // Action Item 2 & 3: Demo mode removes replay button and uses strictly spoiler-free instruction
   function demo() {
     epoch++;
     capture.stop();
@@ -146,7 +222,6 @@ export function mountInteraction({
     target = .45;
     targetTint = 0;
     $('mode').textContent = '互動流程演示';
-    $('replay').hidden = true;
     enter('DEMO');
     const copy = demoCopy();
     setCopy(copy.title, copy.message);
@@ -160,8 +235,9 @@ export function mountInteraction({
     result = null;
     target = 0;
     targetTint = 0;
+    journeyState.effortFrames = [];
+    journeyState.graceFrames = [];
     $('camera').disabled = true;
-    $('replay').hidden = true;
     if ($('journey-replay')) $('journey-replay').hidden = true;
     enter('CONNECT');
     setCopy(STORYBOARD_COPY.stage1Title, STORYBOARD_COPY.stage1SubtitleHtml, true);
@@ -186,9 +262,10 @@ export function mountInteraction({
 
   function finishEffort(now, points) {
     if (points) {
-      lastEffortMask = landmarksToMask(points);
+      journeyState.effortMask = landmarksToMask(points);
     }
-    setMask(lastEffortMask, null, false);
+    journeyState.effortSnapshot = capturePreviewSnapshot() || journeyState.effortSnapshot;
+    setMask(journeyState.effortMask, null, false);
     target = .12;
     targetTint = 0;
     $('mode').textContent = '階段二 · 痕跡消退';
@@ -197,28 +274,44 @@ export function mountInteraction({
     $('headline').style.opacity = '0';
   }
 
+  // Addendum Item 3: Stage 4 uses explicit setTimeout lock (>= 3500ms, set to 4000ms) so the clear imprint is forced to stay on screen
   function startGraceReveal(now, points) {
     if (points) {
-      lastGraceMask = landmarksToMask(points);
+      journeyState.graceMask = landmarksToMask(points);
     }
-    // Stage 4: Immediate, crystal-clear, deep, non-flickering imprint (pressure = null)
-    setMask(lastGraceMask, null, false);
+    journeyState.graceSnapshot = capturePreviewSnapshot();
+    journeyState.graceFrames.push({
+      mask: journeyState.graceMask,
+      snapshot: journeyState.graceSnapshot,
+      depth: 1.18
+    });
+    setMask(journeyState.graceMask, null, false);
     target = 1.18;
     targetTint = 0;
+    graceHoldUnlocked = false;
     $('mode').textContent = '階段四 · 永恆印記';
     enter('REVEAL', now);
     const copy = revealCopyAt(0, reduced);
     setCopy(copy.title, copy.message, false, copy.scripture);
+    graceHoldTimer = setTimeout(() => {
+      graceHoldUnlocked = true;
+    }, Math.max(3500, REVEAL_COPY_TIMING.graceHoldDuration));
   }
 
   function startJourneyReplay() {
     const now = performance.now();
     if ($('journey-replay')) {
       $('journey-replay').hidden = false;
-      drawMaskComparison($('replay-effort-canvas'), lastEffortMask, { mode: 'effort' });
-      drawMaskComparison($('replay-grace-canvas'), lastGraceMask, { mode: 'grace' });
+      renderSnapshotToCanvas($('replay-effort-canvas'), journeyState.effortSnapshot, journeyState.effortMask, {
+        mode: 'effort',
+        fadeProgress: 0
+      });
+      renderSnapshotToCanvas($('replay-grace-canvas'), journeyState.graceSnapshot, journeyState.graceMask, {
+        mode: 'grace',
+        fadeProgress: 0
+      });
     }
-    setMask(lastEffortMask, { phase: 400, progress: .8 }, true);
+    setMask(journeyState.effortMask, { phase: 400, progress: .8 }, true);
     setDepth(.82);
     setEffortTint(.85);
     target = .82;
@@ -232,15 +325,15 @@ export function mountInteraction({
     $('tracking-status').textContent = det.reason;
 
     if (state === 'READY') {
-      // Stage 1: Misdirection & Lure
       setCopy(STORYBOARD_COPY.stage1Title, STORYBOARD_COPY.stage1SubtitleHtml, true);
       if (valid) {
         since ??= now;
         if (now - since > 350) {
           $('mode').textContent = '階段二 · 用力按壓';
           enter('CAPTURE', now);
-          lastEffortMask = landmarksToMask(det.points);
-          setMask(lastEffortMask, { phase: 0, progress: 0 }, false);
+          journeyState.effortMask = landmarksToMask(det.points);
+          journeyState.effortSnapshot = capturePreviewSnapshot();
+          setMask(journeyState.effortMask, { phase: 0, progress: 0 }, false);
           target = captureDepthAt(0, 0, hold.required);
           targetTint = .55;
           setCopy(STORYBOARD_COPY.stage2Pressing, '');
@@ -249,15 +342,23 @@ export function mountInteraction({
         since = null;
       }
     } else if (state === 'CAPTURE') {
-      // Stage 2A: Pressing in progress -> reddish trace on plaster + pressing copy
       const steady = valid && det.motion < .14;
       const status = hold.update(now, steady);
       $('bar').style.width = `${status.progress * 100}%`;
       setCopy(STORYBOARD_COPY.stage2Pressing, '');
 
       if (det.points) {
-        lastEffortMask = landmarksToMask(det.points);
-        setMask(lastEffortMask, { phase: now - entered, progress: status.progress }, false);
+        journeyState.effortMask = landmarksToMask(det.points);
+        setMask(journeyState.effortMask, { phase: now - entered, progress: status.progress }, false);
+        if (journeyState.effortFrames.length < 24) {
+          journeyState.effortFrames.push({
+            elapsed: now - entered,
+            progress: status.progress,
+            depth: target,
+            tint: targetTint
+          });
+        }
+        journeyState.effortSnapshot = capturePreviewSnapshot() || journeyState.effortSnapshot;
       }
       if (present) {
         absent = null;
@@ -278,7 +379,6 @@ export function mountInteraction({
         enter('READY', now);
       }
     } else if (state === 'INVITE') {
-      // Stage 3: Perspective Shift -> low threshold ("輕輕放置", no hard press needed)
       setCopy(STORYBOARD_COPY.stage3Title, STORYBOARD_COPY.stage3Subtitle);
       const transitionDone = (now - entered) >= REVEAL_COPY_TIMING.perspectiveTransitionMs;
       const gentleHandReady = present && Array.isArray(det.points) && det.points.length === 21;
@@ -316,7 +416,6 @@ export function mountInteraction({
     }
 
     if (state === 'LOSS') {
-      // Stage 2B: Red tint fades out, palm print shrinks to shallow, waits 3s then shows futility copy
       const elapsed = now - entered;
       const copy = lossCopyAt(elapsed, reduced);
       setCopy(copy.title, copy.message);
@@ -327,50 +426,60 @@ export function mountInteraction({
         setCopy(STORYBOARD_COPY.stage3Title, STORYBOARD_COPY.stage3Subtitle);
       }
     } else if (state === 'REVEAL') {
-      // Stage 4: Hold clear, deep, steady imprint for >= 4s before Stage 5
       const elapsed = now - entered;
       const copy = revealCopyAt(elapsed, reduced);
       setCopy(copy.title, copy.message, false, copy.scripture);
       $('headline').style.opacity = String(copy.titleOpacity);
-      if (copy.stage === 'STAGE_5_END') {
+      if (copy.stage === 'STAGE_5_END' && graceHoldUnlocked && elapsed >= 3500) {
         $('mode').textContent = '階段五 · 啟示與結束';
         enter('END', now);
       }
     } else if (state === 'END') {
-      // Stage 5: Release prompt + Psalm 139:16 + Journey Replay button
       const copy = revealCopyAt(REVEAL_COPY_TIMING.graceHoldDuration + (now - entered), reduced);
       setCopy(copy.title, copy.message, false, copy.scripture);
       $('headline').style.opacity = String(copy.titleOpacity);
       if ($('scripture')) $('scripture').style.opacity = String(copy.scriptureOpacity);
     } else if (state === 'REPLAY') {
-      // Sequential + split-screen comparison replay of Effort (Stage 2) vs Grace (Stage 4/5)
       const elapsed = now - entered;
       const effortCard = $('replay-card-effort'), graceCard = $('replay-card-grace');
       if (elapsed < 1800) {
         target = .82;
         targetTint = .85;
         setCopy(STORYBOARD_COPY.stage2Pressing, '');
+        renderSnapshotToCanvas($('replay-effort-canvas'), journeyState.effortSnapshot, journeyState.effortMask, {
+          mode: 'effort',
+          fadeProgress: 0.15
+        });
         effortCard?.classList.add('active');
         graceCard?.classList.remove('active');
       } else if (elapsed < 4200) {
+        const fadeP = Math.min(1, (elapsed - 1800) / 2000);
         target = .12;
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage2Faded, '');
+        renderSnapshotToCanvas($('replay-effort-canvas'), journeyState.effortSnapshot, journeyState.effortMask, {
+          mode: 'effort',
+          fadeProgress: fadeP
+        });
         effortCard?.classList.add('active');
         graceCard?.classList.remove('active');
-      } else if (elapsed < 5600) {
+      } else if (elapsed < 5700) {
         target = .12;
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage3Title, STORYBOARD_COPY.stage3Subtitle);
         effortCard?.classList.remove('active');
         graceCard?.classList.remove('active');
-      } else if (elapsed < 8800) {
+      } else if (elapsed < 9200) {
         if (target < 1) {
-          setMask(lastGraceMask, null, false);
+          setMask(journeyState.graceMask, null, false);
         }
         target = 1.18;
         targetTint = 0;
         setCopy(STORYBOARD_COPY.stage4Grace, '');
+        renderSnapshotToCanvas($('replay-grace-canvas'), journeyState.graceSnapshot, journeyState.graceMask, {
+          mode: 'grace',
+          fadeProgress: 0
+        });
         effortCard?.classList.remove('active');
         graceCard?.classList.add('active');
       } else {
@@ -395,14 +504,13 @@ export function mountInteraction({
     setEffortTint(Math.abs(nextTint - targetTint) < .001 ? targetTint : nextTint);
 
     if (debug) {
-      $('debug').textContent = `${state} | depth ${getDepth().toFixed(2)} | tint ${getEffortTint().toFixed(2)} | ${result?.valid ? '21 landmarks' : 'waiting'} | v5`;
+      $('debug').textContent = `${state} | depth ${getDepth().toFixed(2)} | tint ${getEffortTint().toFixed(2)} | ${result?.valid ? '21 landmarks' : 'waiting'} | v5.1`;
     }
   }
 
   $('camera').onclick = start;
   $('demo').onclick = demo;
   $('stop').onclick = stop;
-  $('replay').onclick = startJourneyReplay;
   $('fs').onclick = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();

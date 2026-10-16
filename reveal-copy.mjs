@@ -17,7 +17,7 @@ export const STORYBOARD_COPY = Object.freeze({
 export const REVEAL_COPY_TIMING = Object.freeze({
   lossCopyDelay: 3000,
   lossTotalDuration: 7200,
-  perspectiveTransitionMs: 1800,
+  perspectiveTransitionMs: 1500,
   graceHoldDuration: 4000,
   fadeDuration: 1200
 });
@@ -42,7 +42,7 @@ export function lossCopyAt(elapsed, reducedMotion = false) {
 }
 
 // Stage 4 -> Stage 5 copy progression:
-// - Stage 4 (0 <= elapsed < graceHoldDuration): Instant display upon gentle placement, held >= 4s.
+// - Stage 4 (0 <= elapsed < graceHoldDuration, minimum >= 3500ms): Instant display upon gentle placement, forced hold for 4000ms.
 // - Stage 5 (elapsed >= graceHoldDuration): Displays the release message, Psalm 139:16 scripture, and enables journey replay.
 export function revealCopyAt(elapsed, reducedMotion = false) {
   const { graceHoldDuration, fadeDuration } = REVEAL_COPY_TIMING;
